@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link type="text/css" rel="stylesheet" href="style.css"/>
+    <style type="text/css">
+
+#states path {
+  fill: #ccc;
+  stroke: #fff;
+}
+
+path.arc {
+  pointer-events: none;
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 5;
+}
+
+path.cell {
+  fill: none;
+  pointer-events: all;
+}
+
+circle {
+  fill: steelblue;
+  fill-opacity: .8;
+  stroke: #fff;
+}
+
+select {
+  margin-right: 10px;
+}
+
+#my_dataviz {
+  position: absolute;
+  right: 0px;
+}
+    </style>
+  </head>
+  <body>
+    <div id="map">
+    </div>
+      <select id="selectButton"></select>
+      <div id="my_dataviz"></div>
+    <script src="https://d3js.org/d3.v4.js"></script>
+    <script>
+      d3v4 = d3
+      window.d3 = null
+    </script>
+    <script type="text/javascript" src="d3/d3.js"></script>
+    <script type="text/javascript" src="d3/d3.csv.js"></script>
+    <script type="text/javascript" src="d3/d3.geo.js"></script>
+    <script type="text/javascript" src="d3/d3.geom.js"></script>
+    <script>
+      d3v2 = d3
+    </script>
+    <script type="text/javascript">
+var w = 1280,
+    h = 800;
+
+var projection = d3v2.geo.azimuthal()
+    .mode("equidistant")
+    .origin([-98, 38])
+    .scale(1400)
+    .translate([640, 360]);
+
+var path = d3v2.geo.path()
+    .projection(projection);
+
+var originDropdown = d3v2.select('div#map')
+  .append('select')
+  	.attr('class','selectOrigin')
+    .on('change', changeOrigin);
+
+var destDropdown = d3v2.select('div#map')
+  .append('select')
+  	.attr('class','selectDest')
+    .on('change', changeDest);
+
+var svg = d3v2.select("div#map").insert("svg:svg", "div#map")
+    .attr("width", w)
+    .attr("height", h);
+
+var states = svg.append("svg:g")
+    .attr("id", "states");
+
+var circles = svg.append("svg:g")
+    .attr("id", "circles");
+
+d3v2.select("input[type=checkbox]").on("change", function() {
+  cells.classed("voronoi", this.checked);
+});
+
+d3v2.json("https://mbostock.github.io/d3/talk/20111116/us-states.json", function(collection) {
+  states.selectAll("path")
+      .data(collection.features)
+    .enter().append("svg:path")
+      .attr("d", path);
+});
+
+var airports = []
+var filteredAirports = []
+var linksByOrigin = {};
+var locationByAirport = {};
+var countByAirport = {};
+var positions = [];
+var circleCounter = 0;
+
+d3v2.csv("https://mbostock.github.io/d3/talk/20111116/flights-airport.csv", function(flights) {
+
+
+  flights.forEach(function(flight) {
+    var origin = flight.origin,
+        destination = flight.destination,
+        links = linksByOrigin[origin] || (linksByOrigin[origin] = []);
+    links.push({source: origin, target: destination});
+    countByAirport[origin] = (countByAirport[origin] || 0) + 1;
+    countByAirport[destination] = (countByAirport[destination] || 0) + 1;
+  });
+
+  d3v2.csv("https://mbostock.github.io/d3/talk/20111116/airports.csv", function(airports) {
+
+    // Only consider airports with at least one flight.
+    airports = airports.filter(function(airport) {
+      if (countByAirport[airport.iata] && countByAirport[airport.iata] > 100) {
+        var location = [+airport.longitude, +airport.latitude];
+        locationByAirport[airport.iata] = location;
+        positions.push(projection(location));
+        return true;
+      }
+    });
+
+    filteredAirports = airports;
+
+    originDropdown.selectAll('option').data(filteredAirports).enter()
+      .append('option')
+        .text(function (d) { return d.iata; })
+        .property("selected", function (d) { return d.iata=== "BWI" })
+
+    changeOrigin();
+
+    circles.selectAll("circle")
+        .data(filteredAirports)
+      .enter().append("svg:circle")
+        .attr("cx", function(d, i) { return positions[i][0]; })
+        .attr("cy", function(d, i) { return positions[i][1]; })
+        .attr("r", function(d, i) { return Math.sqrt(countByAirport[d.iata]); })
+        .sort(function(a, b) { return countByAirport[b.iata] - countByAirport[a.iata]; })
+        .on("click", circleClicked)
+    })
+});
+
+
+function circleClicked(d, i) {
+  if (circleCounter == 0) {
+    originDropdown.node().value = d.iata;
+    changeOrigin();
+    circleCounter = 1
+  }
+  else {
+    destDropdown.node().value = d.iata;
+    changeDest();
+    circleCounter = 0
+  }
+}
+
+function changeOrigin() {
+	selectValue = d3v2.select('.selectOrigin').property('value')
+  
+  filteredDestinations = linksByOrigin[selectValue].filter(function(d) {
+    return filteredAirports.some(airport => airport.iata == d.target)
+  })
+    
+  destDropdown.selectAll('option').data(filteredDestinations).enter()
+    .append('option')
+      .text(function (d) { return d.target; })
+  destDropdown.node().value = ""
+  drawArc()
+};
+
+function changeDest() {
+  drawArc()
+};
+
+function drawArc() {
+  var origin = d3v2.select('.selectOrigin').property('value')
+  var destination = d3v2.select('.selectDest').property('value')
+
+  d3v2.select(".arc").remove()
+
+  if (destination != "") {
+    var arc = d3v2.geo.greatArc()
+      .source(function(d) { return locationByAirport[d.source]; })
+      .target(function(d) { return locationByAirport[d.target]; });
+    console.log(arc)
+
+    svg.append("svg:path")
+      .attr("class", "arc")
+      .attr("d", function(d) { return path(arc({ source: origin, target: destination})); });
+    }
+}
+    </script>
+    <script>
+  // set the dimensions and margins of the graph
+  var margin = {top: 10, right: 100, bottom: 30, left: 30},
+      width = 460 - margin.left - margin.right,
+      height = 400 - margin.top - margin.bottom;
+
+  // append the svg object to the body of the page
+  var chart_svg = d3v4.select("#my_dataviz")
+    .append("svg")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+    .append("g")
+      .attr("transform",
+            "translate(" + margin.left + "," + margin.top + ")");
+
+  //Read the data
+  d3v4.csv("https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/data_connectedscatter.csv", function(data) {
+
+      // List of groups (here I have one group per column)
+      var allGroup = ["valueA", "valueB", "valueC"]
+
+      // add the options to the button
+      d3v4.select("#selectButton")
+        .selectAll('myOptions')
+        .data(allGroup)
+        .enter()
+        .append('option')
+        .text(function (d) { return d; }) // text showed in the menu
+        .attr("value", function (d) { return d; }) // corresponding value returned by the button
+
+      // Add X axis --> it is a date format
+      var x = d3v4.scaleLinear()
+        .domain([0,10])
+        .range([ 0, width ]);
+      chart_svg.append("g")
+        .attr("transform", "translate(0," + height + ")")
+        .call(d3v4.axisBottom(x));
+
+      // Add Y axis
+      var y = d3v4.scaleLinear()
+        .domain( [0,20])
+        .range([ height, 0 ]);
+      chart_svg.append("g")
+        .call(d3v4.axisLeft(y));
+
+      // Initialize line with group a
+      var line = chart_svg
+        .append('g')
+        .append("path")
+          .datum(data)
+          .attr("d", d3v4.line()
+            .x(function(d) { return x(+d.time) })
+            .y(function(d) { return y(+d.valueA) })
+          )
+          .attr("stroke", "#66c2a5")
+          .style("stroke-width", 4)
+          .style("fill", "none")
+
+      // A function that update the chart
+      function update(selectedGroup) {
+
+        // Create new data with the selection?
+        var dataFilter = data.map(function(d){return {time: d.time, value:d[selectedGroup]} })
+
+        // Give these new data to update line
+        line
+            .datum(dataFilter)
+            .transition()
+            .duration(1000)
+            .attr("d", d3v4.line()
+              .x(function(d) { return x(+d.time) })
+              .y(function(d) { return y(+d.value) })
+            )
+            .attr("stroke", "#66c2a5")
+      }
+
+      // When the button is changed, run the updateChart function
+      d3v4.select("#selectButton").on("change", function(d) {
+          // recover the option that has been chosen
+          var selectedOption = d3v4.select(this).property("value")
+          // run the updateChart function with this selected option
+          update(selectedOption)
+      })
+
+  })
+
+  </script>
+  </body>
+</html>
